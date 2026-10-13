@@ -1,0 +1,93 @@
+"""
+2D heat equation, explicit FTCS scheme, Dirichlet (fixed temperature) edges.
+
+    dT/dt = alpha * (d2T/dx2 + d2T/dy2)
+
+Run:
+    python heat2d.py            # animated heatmap
+    python heat2d.py --validate # compare against the analytical solution
+"""
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# ---------- Physical parameters ----------
+L = 0.1          # plate side length (m)
+alpha = 1e-4     # thermal diffusivity (m^2/s), roughly a poor conductor
+T_edge = 20.0    # fixed edge temperature (deg C)
+T_hot = 100.0    # initial hot spot temperature (deg C)
+
+# ---------- Numerical parameters ----------
+N = 101                      # grid points per side
+dx = L / (N - 1)
+r = 0.2                      # r = alpha*dt/dx^2, must be <= 0.25 for 2D stability
+dt = r * dx**2 / alpha       # time step chosen FROM the stability limit
+steps_per_frame = 20
+
+
+def step(T):
+    """Advance the temperature field by one explicit time step (in place)."""
+    T[1:-1, 1:-1] += r * (
+        T[2:, 1:-1] + T[:-2, 1:-1] + T[1:-1, 2:] + T[1:-1, :-2]
+        - 4 * T[1:-1, 1:-1]
+    )
+    # Dirichlet edges: the outer ring is never updated, so it stays at T_edge.
+
+
+def initial_condition():
+    T = np.full((N, N), T_edge)
+    c = N // 2
+    w = N // 10
+    T[c - w:c + w, c - w:c + w] = T_hot
+    return T
+
+
+def animate():
+    T = initial_condition()
+    fig, ax = plt.subplots()
+    im = ax.imshow(T, cmap="inferno", vmin=T_edge, vmax=T_hot,
+                   origin="lower", extent=[0, L, 0, L])
+    fig.colorbar(im, label="Temperature (°C)")
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+    title = ax.set_title("t = 0.0 s")
+    state = {"t": 0.0}
+
+    def update(_):
+        for _ in range(steps_per_frame):
+            step(T)
+        state["t"] += steps_per_frame * dt
+        im.set_data(T)
+        title.set_text(f"t = {state['t']:.1f} s")
+        return im, title
+
+    anim = FuncAnimation(fig, update, interval=30, blit=False, cache_frame_data=False)
+    plt.show()
+    return anim
+
+
+def validate():
+    """
+    Initial condition T = T_hot*sin(pi x/L)*sin(pi y/L) with zero edges has the
+    exact solution T(x,y,t) = T_hot*sin(pi x/L)*sin(pi y/L)*exp(-2*alpha*pi^2*t/L^2).
+    """
+    x = np.linspace(0, L, N)
+    X, Y = np.meshgrid(x, x)
+    mode = np.sin(np.pi * X / L) * np.sin(np.pi * Y / L)
+    T = T_hot * mode
+    n_steps = 2000
+    for _ in range(n_steps):
+        step(T)
+    t = n_steps * dt
+    exact = T_hot * mode * np.exp(-2 * alpha * np.pi**2 * t / L**2)
+    err = np.max(np.abs(T - exact))
+    print(f"t = {t:.2f} s, max error = {err:.4e} °C "
+          f"({100 * err / T_hot:.4f}% of T_hot)")
+
+
+if __name__ == "__main__":
+    if "--validate" in sys.argv:
+        validate()
+    else:
+        animate()
